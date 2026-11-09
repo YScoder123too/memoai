@@ -1,0 +1,18 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,600&family=Inter:wght@400;500;600&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --bg:#12151F; --panel:#1A1E2B; --line:#262C3D; --amber:#E8A855; --text:#EDEAE2; --mute:#9CA3AF; --dim:#5B6274; }
+html, body, #root { min-height: 100%; }
+body { margin:0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.font-display { font-family: Fraunces, serif; font-style: italic; }
+.glass { background: rgba(26,30,43,.45); backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); border:1px solid rgba(255,255,255,.08); box-shadow: 0 8px 32px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06); }
+.btn { background: var(--amber); color:#12151F; font-weight:600; border-radius:12px; padding:.6rem 1.1rem; transition: transform .15s, box-shadow .15s; }
+.btn:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(232,168,85,.35); }
+.btn:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+.input { width:100%; background: rgba(18,21,31,.7); border:1px solid var(--line); border-radius:12px; padding:.7rem .9rem; color: var(--text); outline:none; font-size:.9rem; }
+.input:focus { border-color: var(--amber); }
+@keyframes drift1 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(60px,40px)} }
+@keyframes drift2 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-70px,-30px)} }
+@media (prefers-reduced-motion: reduce) { *{animation:none!important; transition:none!important} }
