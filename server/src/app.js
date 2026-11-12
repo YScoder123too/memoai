@@ -10,7 +10,7 @@ import * as qd from "./qdrant.js";
 
 export function createApp() {
   const app = express();
-    app.use(cors({ origin: (origin, cb) => cb(null, !origin || config.origins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) }));
+  app.use(cors({ origin: (origin, cb) => cb(null, !origin || config.origins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) }));
   app.use(express.json({ limit: "2mb" }));
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, standardHeaders: true, legacyHeaders: false });
@@ -69,8 +69,9 @@ export function createApp() {
       // Memory is a bonus layer: if embeddings or Qdrant fail, the student still gets an answer and a clear note.
       if (qd.enabled()) {
         try {
-          vector = await ai.embed(question);
-          related = await qd.search(req.userId, vector, 3);
+          const why = (who) => (e) => { throw new Error(`${who}: ${e.message}${e.cause ? ` (${e.cause.code || e.cause.message})` : ""}`); };
+          vector = await ai.embed(question).catch(why("Gemini"));
+          related = await qd.search(req.userId, vector, 3).catch(why("Qdrant"));
         } catch (e) { console.error("[ask] memory lookup failed:", e.message); warning = `Memory lookup failed: ${e.message}`; vector = null; }
       } else warning = "Semantic memory is off (set QDRANT_URL and GEMINI_API_KEY on the server).";
       const text = await ai.answer(subj, question, related);
