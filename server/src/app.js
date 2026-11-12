@@ -10,6 +10,7 @@ import * as qd from "./qdrant.js";
 
 export function createApp() {
   const app = express();
+  app.set("trust proxy", 1);
   app.use(cors({ origin: (origin, cb) => cb(null, !origin || config.origins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) }));
   app.use(express.json({ limit: "2mb" }));
 
