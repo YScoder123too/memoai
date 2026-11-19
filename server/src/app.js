@@ -60,6 +60,9 @@ export function createApp() {
   // The core flow: retrieve similar past doubts -> answer with that context -> store this doubt as new memory.
   app.post("/api/ask", requireAuth, askLimiter, async (req, res) => {
     const { id, subject, question } = req.body || {};
+        const history = (Array.isArray(req.body?.history) ? req.body.history : []).slice(-6)
+      .filter((h) => h && (h.role === "user" || h.role === "ai") && typeof h.text === "string" && h.text.trim())
+      .map((h) => ({ role: h.role === "ai" ? "assistant" : "user", content: h.text.slice(0, 1500) }));
     if (typeof question !== "string" || !question.trim() || question.length > 1500) return res.status(400).json({ error: "Type a question under 1500 characters." });
     if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: "Invalid doubt id." });
     const subj = typeof subject === "string" ? subject.slice(0, 80) : "";
@@ -75,7 +78,7 @@ export function createApp() {
           related = await qd.search(req.userId, vector, 3).catch(why("Qdrant"));
         } catch (e) { console.error("[ask] memory lookup failed:", e.message); warning = `Memory lookup failed: ${e.message}`; vector = null; }
       } else warning = "Semantic memory is off (set QDRANT_URL and GEMINI_API_KEY on the server).";
-      const text = await ai.answer(subj, question, related);
+      const text = await ai.answer(subj, question, related, history);
       if (vector) {
         try { await qd.upsert(id, vector, { userId: String(req.userId), subject: subj, question, answer: text, at: Date.now() }); }
         catch (e) { console.error("[ask] memory save failed:", e.message); warning = `Answer not saved to vector memory: ${e.message}`; }

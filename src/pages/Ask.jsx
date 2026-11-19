@@ -2,6 +2,7 @@
 // import { motion } from "framer-motion";
 // import { Send, Brain, KeyRound, Trash2 } from "lucide-react";
 // import { Page, Card } from "../components/Page";
+// import Markdown from "../components/Markdown";
 // import { topicsOf } from "../exams";
 // import { askGroq } from "../ai";
 // import { api, hasApi, getToken } from "../api";
@@ -61,7 +62,7 @@
 //             )}
 //             {s.chat.map((m) => (
 //               <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={m.role === "user" ? "self-end max-w-[85%]" : "self-start max-w-[92%]"}>
-//                 <div className="rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap" style={m.role === "user" ? { background: "#E8A855", color: "#12151F" } : { background: "rgba(18,21,31,.75)", border: `1px solid ${m.error ? "#5b2a2a" : "#262C3D"}`, lineHeight: 1.65 }}>{m.text}</div>
+//                 <div className={`rounded-2xl px-4 py-3 text-sm ${m.role === "user" || m.error ? "whitespace-pre-wrap" : ""}`} style={m.role === "user" ? { background: "#E8A855", color: "#12151F" } : { background: "rgba(18,21,31,.75)", border: `1px solid ${m.error ? "#5b2a2a" : "#262C3D"}`, lineHeight: 1.65 }}>{m.role === "user" || m.error ? m.text : <Markdown text={m.text} />}</div>
 //                 {m.warning && <p className="mt-2 text-xs" style={{ color: "#C9A36A" }}>{m.warning}</p>}
 //                 {m.related?.length > 0 && (
 //                   <div className="mt-2 text-xs" style={{ color: "#9CA3AF" }}>
@@ -101,70 +102,124 @@
 //   );
 // }
 
-
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Send, Brain, KeyRound, Trash2 } from "lucide-react";
+import { Send, Brain, KeyRound, Trash2, Plus, MessageSquare } from "lucide-react";
 import { Page, Card } from "../components/Page";
-import Markdown from "../components/Markdown";
+import Markdown, { plain } from "../components/Markdown";
 import { topicsOf } from "../exams";
 import { askGroq } from "../ai";
 import { api, hasApi, getToken } from "../api";
 import { related, weakSpots } from "../memory";
 import { actions, useStore, uid } from "../store";
 
+const cidOf = (m) => m.cid || "old";
+
+// Group the flat message list into chats: one per conversation id, newest first.
+function threadsOf(chat) {
+  const map = new Map();
+  for (const m of chat) {
+    const c = cidOf(m);
+    const t = map.get(c) || { cid: c, title: "", at: 0, count: 0 };
+    if (!t.title && m.role === "user") t.title = m.text;
+    t.at = Math.max(t.at, m.at || 0);
+    t.count++;
+    map.set(c, t);
+  }
+  return [...map.values()].sort((a, b) => b.at - a.at);
+}
+
+const ago = (t) => {
+  const d = Math.floor((Date.now() - t) / 86400000);
+  return d <= 0 ? "Today" : d === 1 ? "Yesterday" : `${d} days ago`;
+};
+
 export default function Ask() {
   const s = useStore();
+  const loc = useLocation();
+  const nav = useNavigate();
   const subjects = topicsOf(s.exam, s.customSubjects);
   const [subject, setSubject] = useState(subjects[0] || "General");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const end = useRef(null);
+  const seeded = useRef(false);
   const server = hasApi && !!getToken();
   const spots = weakSpots(s.doubts, 4);
+  const threads = useMemo(() => threadsOf(s.chat), [s.chat]);
+  const [cid, setCid] = useState(() => threads[0]?.cid || uid());
+  const messages = s.chat.filter((m) => cidOf(m) === cid);
 
-  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [s.chat.length, busy]);
+  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages.length, busy, cid]);
+
+  // Arriving from a Memory card: open the chat that holds that doubt, or start one seeded with it.
+  useEffect(() => {
+    const id = loc.state?.doubtId;
+    if (!id || seeded.current) return;
+    seeded.current = true;
+    const existing = s.chat.find((m) => m.doubtId === id);
+    if (existing) setCid(cidOf(existing));
+    else {
+      const d = s.doubts.find((x) => x.id === id);
+      if (d) {
+        const c = uid();
+        actions.addChat({ cid: c, role: "user", text: d.question, subject: d.subject });
+        actions.addChat({ cid: c, role: "ai", text: d.answer || "No answer was saved for this doubt. Ask it again below.", doubtId: d.id });
+        setCid(c);
+      }
+    }
+    nav(loc.pathname, { replace: true, state: null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const newChat = () => { setCid(uid()); setQ(""); setErr(""); };
+  const removeThread = (c) => {
+    actions.removeChat(c);
+    if (c === cid) setCid(threads.find((t) => t.cid !== c)?.cid || uid());
+  };
 
   const send = async (e) => {
     e.preventDefault();
     const question = q.trim();
     if (!question || busy) return;
     if (!server && !s.groqKey) return setErr("Add a Groq key on the Memory page to get AI answers. Your past doubts are still searched without it.");
+    // earlier turns of this chat, so follow-ups like "explain simpler" keep their context
+    const history = messages.filter((m) => !m.error).slice(-6).map((m) => ({ role: m.role, text: m.text }));
     setErr(""); setQ(""); setBusy(true);
-    actions.addChat({ role: "user", text: question, subject });
+    actions.addChat({ cid, role: "user", text: question, subject });
     try {
       const id = uid();
       let answer, rel, warning = null;
       if (server) {
-        const r = await api.ask({ id, subject, question });
+        const r = await api.ask({ id, subject, question, history });
         answer = r.answer; rel = r.related || []; warning = r.warning || null;
       } else {
         rel = related(s.doubts, question, 3);
-        answer = await askGroq(s.groqKey, subject, question, rel);
+        answer = await askGroq(s.groqKey, subject, question, rel, history);
       }
-      actions.addChat({ role: "ai", text: answer, related: rel.map((r) => ({ id: r.id, question: r.question, subject: r.subject })), doubtId: id, warning });
+      actions.addChat({ cid, role: "ai", text: answer, related: rel.map((r) => ({ id: r.id, question: r.question, subject: r.subject })), doubtId: id, warning });
       actions.addDoubt({ id, subject, question, answer });
     } catch (ex) {
-      actions.addChat({ role: "ai", text: ex.message || "Something went wrong. Try again.", error: true });
+      actions.addChat({ cid, role: "ai", text: ex.message || "Something went wrong. Try again.", error: true });
     }
     setBusy(false);
   };
 
   return (
-    <Page title="Ask" sub="Every answer is saved to your memory and scheduled for review. Related past doubts are pulled in automatically."
-      action={s.chat.length > 0 && <button onClick={actions.clearChat} className="text-xs inline-flex items-center gap-1" style={{ color: "#9CA3AF" }}><Trash2 size={12} /> Clear chat</button>}>
+    <Page title="Ask" sub="Every answer is saved to your memory and scheduled for review. Your chats are kept, so you can come back to any of them."
+      action={<button onClick={newChat} className="btn text-sm inline-flex items-center gap-2"><Plus size={14} /> New chat</button>}>
       <div className="grid lg:grid-cols-3 gap-6 items-start">
         <div className="lg:col-span-2 flex flex-col">
           <div className="glass rounded-2xl p-5 min-h-[360px] max-h-[55vh] overflow-y-auto flex flex-col gap-4" aria-live="polite">
-            {s.chat.length === 0 && (
+            {messages.length === 0 && (
               <div className="m-auto text-center max-w-sm">
                 <Brain className="mx-auto mb-3" style={{ color: "#E8A855" }} />
                 <p className="font-display text-xl mb-1">Ask your first doubt</p>
                 <p className="text-sm" style={{ color: "#9CA3AF" }}>The more you ask, the better MemoAI knows what you keep struggling with.</p>
               </div>
             )}
-            {s.chat.map((m) => (
+            {messages.map((m) => (
               <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={m.role === "user" ? "self-end max-w-[85%]" : "self-start max-w-[92%]"}>
                 <div className={`rounded-2xl px-4 py-3 text-sm ${m.role === "user" || m.error ? "whitespace-pre-wrap" : ""}`} style={m.role === "user" ? { background: "#E8A855", color: "#12151F" } : { background: "rgba(18,21,31,.75)", border: `1px solid ${m.error ? "#5b2a2a" : "#262C3D"}`, lineHeight: 1.65 }}>{m.role === "user" || m.error ? m.text : <Markdown text={m.text} />}</div>
                 {m.warning && <p className="mt-2 text-xs" style={{ color: "#C9A36A" }}>{m.warning}</p>}
@@ -181,26 +236,49 @@ export default function Ask() {
           </div>
           <form onSubmit={send} className="mt-4 flex gap-3 flex-wrap">
             <select className="input !w-auto" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject">{subjects.map((x) => <option key={x}>{x}</option>)}</select>
-            <input className="input flex-1 min-w-[200px]" placeholder="Type your doubt..." value={q} onChange={(e) => setQ(e.target.value)} aria-label="Your doubt" />
+            <input className="input flex-1 min-w-[200px]" placeholder={messages.length ? "Ask a follow-up..." : "Type your doubt..."} value={q} onChange={(e) => setQ(e.target.value)} aria-label="Your doubt" />
             <button className="btn inline-flex items-center gap-2" disabled={busy}><Send size={14} /> Ask</button>
           </form>
           {err && <p role="alert" className="text-sm mt-3 flex items-center gap-2" style={{ color: "#F08A7E" }}><KeyRound size={14} /> {err}</p>}
         </div>
 
-        <Card>
-          <p className="font-display text-xl mb-1">Recurring weak spots</p>
-          <p className="text-xs mb-4" style={{ color: "#9CA3AF" }}>Concepts you ask about repeatedly or forget in review.</p>
-          {spots.length === 0 ? <p className="text-sm" style={{ color: "#5B6274" }}>Nothing recurring yet. Weak spots appear once a concept comes up more than once.</p> : (
-            <ul className="flex flex-col gap-3">
-              {spots.map((w) => (
-                <li key={w.tag} className="flex items-center justify-between text-sm">
-                  <span>{w.tag} <span className="text-xs" style={{ color: "#5B6274" }}>{w.subject}</span></span>
-                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(232,168,85,.15)", color: "#E8A855" }}>asked {w.asked}x{w.forgot ? `, forgot ${w.forgot}x` : ""}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        <div className="flex flex-col gap-6">
+          <Card>
+            <p className="font-display text-xl mb-1">Your chats</p>
+            <p className="text-xs mb-4" style={{ color: "#9CA3AF" }}>Deleting a chat keeps its doubts in Memory.</p>
+            {threads.length === 0 ? <p className="text-sm" style={{ color: "#5B6274" }}>No chats yet. Ask something and it shows up here.</p> : (
+              <ul className="flex flex-col gap-1 max-h-64 overflow-y-auto">
+                {threads.map((t) => (
+                  <li key={t.cid} className="flex items-center gap-1">
+                    <button onClick={() => { setCid(t.cid); setErr(""); }} className="flex-1 min-w-0 text-left px-3 py-2 rounded-lg text-sm flex items-start gap-2" style={{ background: t.cid === cid ? "#1E2433" : "transparent", color: t.cid === cid ? "#E8A855" : "#C7C3B8" }}>
+                      <MessageSquare size={14} className="mt-0.5 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block truncate">{plain(t.title) || "Chat"}</span>
+                        <span className="block text-[11px]" style={{ color: "#5B6274" }}>{ago(t.at)} · {Math.ceil(t.count / 2)} {Math.ceil(t.count / 2) === 1 ? "question" : "questions"}</span>
+                      </span>
+                    </button>
+                    <button onClick={() => removeThread(t.cid)} aria-label="Delete chat" className="p-2" style={{ color: "#5B6274" }}><Trash2 size={13} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <p className="font-display text-xl mb-1">Recurring weak spots</p>
+            <p className="text-xs mb-4" style={{ color: "#9CA3AF" }}>Concepts you ask about repeatedly or forget in review.</p>
+            {spots.length === 0 ? <p className="text-sm" style={{ color: "#5B6274" }}>Nothing recurring yet. Weak spots appear once a concept comes up more than once.</p> : (
+              <ul className="flex flex-col gap-3">
+                {spots.map((w) => (
+                  <li key={w.tag} className="flex items-center justify-between text-sm">
+                    <span>{w.tag} <span className="text-xs" style={{ color: "#5B6274" }}>{w.subject}</span></span>
+                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(232,168,85,.15)", color: "#E8A855" }}>asked {w.asked}x{w.forgot ? `, forgot ${w.forgot}x` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
       </div>
     </Page>
   );

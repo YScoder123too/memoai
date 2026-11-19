@@ -87,7 +87,9 @@ export const actions = {
     }),
   updateDoubt: (id, patch) => commit({ ...state, doubts: state.doubts.map((d) => (d.id === id ? { ...d, ...patch } : d)) }),
   removeDoubt: (id) => { if (hasApi && getToken()) api.forget(id).catch(() => {}); commit({ ...state, doubts: state.doubts.filter((d) => d.id !== id) }); },
-  addChat: (m) => commit({ ...state, chat: [...state.chat, { id: uid(), at: Date.now(), ...m }].slice(-60) }),
+  // Messages carry a conversation id (cid). Several chats live in one list; the newest 100 messages are kept.
+  addChat: (m) => commit({ ...state, chat: [...state.chat, { id: uid(), at: Date.now(), ...m }].slice(-100) }),
+  removeChat: (cid) => commit({ ...state, chat: state.chat.filter((m) => (m.cid || "old") !== cid) }),
   clearChat: () => commit({ ...state, chat: [] }),
   // spaced repetition: remembered moves it further out, forgot resets it to day 1
   review: (id, remembered) =>
