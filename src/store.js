@@ -67,7 +67,7 @@ export const actions = {
   setPrefs: (p) => commit({ ...state, ...p }),
   addTask: (text, subject = "") =>
     text.trim() && commit({ ...state, tasks: [{ id: uid(), text: text.trim(), subject, done: false, at: Date.now() }, ...state.tasks] }),
-  toggleTask: (id) => commit({ ...state, tasks: state.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) }),
+  toggleTask: (id) => commit({ ...state, tasks: state.tasks.map((t) => (t.id === id ? { ...t, done: !t.done, doneAt: t.done ? null : Date.now() } : t)) }),
   removeTask: (id) => commit({ ...state, tasks: state.tasks.filter((t) => t.id !== id) }),
   logSession: (subject, minutes) =>
     commit({ ...state, sessions: [...state.sessions, { id: uid(), subject, minutes, at: Date.now() }] }),

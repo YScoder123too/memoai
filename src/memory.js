@@ -35,19 +35,19 @@ export function related(doubts, query, k = 3, minScore = 0.12) {
     .slice(0, k);
 }
 
-// A concept is a weak spot when it keeps coming back: asked about 2+ times, or forgotten in review.
+// A topic is a weak spot when it keeps coming back: 2+ doubts in it, or a revised doubt was forgotten.
+// Doubts are filed under topics by the AI, so this works on topics, not on single keywords.
 export function weakSpots(doubts, limit = 5) {
   const map = {};
   doubts.forEach((d) => {
-    const forgot = d.history.filter((h) => !h.remembered).length;
-    (d.tags?.length ? d.tags : keywords(d.question, 2)).forEach((t) => {
-      const e = (map[t] ||= { tag: t, asked: 0, forgot: 0, subject: d.subject });
-      e.asked += 1; e.forgot += forgot;
-    });
+    const topic = d.subject || "Miscellaneous";
+    const e = (map[topic] ||= { topic, doubts: 0, forgot: 0 });
+    e.doubts += 1;
+    e.forgot += (d.history || []).filter((h) => !h.remembered).length;
   });
   return Object.values(map)
-    .map((e) => ({ ...e, weight: e.asked + e.forgot * 2 }))
-    .filter((e) => e.asked >= 2 || e.forgot >= 1)
+    .filter((e) => e.topic !== "Miscellaneous" && (e.doubts >= 2 || e.forgot >= 1))
+    .map((e) => ({ ...e, weight: e.doubts + e.forgot * 2, why: e.forgot ? `Forgot ${e.forgot} ${e.forgot === 1 ? "time" : "times"} in revision` : `${e.doubts} doubts here` }))
     .sort((a, b) => b.weight - a.weight)
     .slice(0, limit);
 }
