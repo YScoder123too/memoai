@@ -2,7 +2,7 @@ import { config } from "./config.js";
 import { failed } from "./http.js";
 
 // Groq chat completion. Related past doubts are injected as context: this is what makes answers personal.
-export async function answer(subject, question, memories) {
+export async function answer(subject, question, memories, history = []) {
   if (!config.groq) throw new Error("GROQ_API_KEY is not set on the server.");
   const ctx = memories.length
     ? "\n\nThe student previously asked these related doubts. Connect your answer to them where it helps:\n" +
@@ -15,6 +15,7 @@ export async function answer(subject, question, memories) {
     max_tokens: 2000,
     messages: [
       { role: "system", content: "You are a patient tutor. Answer the student's doubt in under 150 words. Be accurate and concrete. If unsure, say so." + ctx },
+            ...history,
       { role: "user", content: `Subject: ${subject}\nDoubt: ${question}` },
     ],
   };
